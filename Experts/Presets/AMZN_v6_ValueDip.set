@@ -1,0 +1,9 @@
+InpMagicNum=999103
+InpAdaptive=false
+InpUseMeanRev=true
+InpUseKAMA=false
+InpUseSentiment=true
+InpMacroBias=1
+InpRiskPercent=0.7
+InpRSI_Per=5
+InpRSI_Low=15

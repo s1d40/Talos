@@ -1,0 +1,12 @@
+; OBS1DIAN AI - ENJ Warrior
+InpMagicNum=4021
+InpAdaptive=0
+InpUseKAMA=0
+InpUseMeanRev=0
+InpUseWarrior=1
+InpUseBreakout=0
+InpRiskPercent=0.5
+InpATRMult=3.5
+InpTPMultiplier=2.0
+InpSafetyThreshold=8.0
+InpDisableSafety=0

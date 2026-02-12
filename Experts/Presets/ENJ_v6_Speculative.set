@@ -1,0 +1,7 @@
+InpMagicNum=999109
+InpAdaptive=false
+InpUseWarrior=true
+InpUseSentiment=true
+InpMacroBias=1
+InpRiskPercent=0.8
+InpSafetyThreshold=1.5

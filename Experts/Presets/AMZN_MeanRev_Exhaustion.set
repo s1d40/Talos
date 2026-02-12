@@ -1,0 +1,13 @@
+; OBS1DIAN AI - AMZN MeanRev
+InpMagicNum=2050
+InpAdaptive=0
+InpUseKAMA=0
+InpUseMeanRev=1
+InpUseWarrior=0
+InpUseBreakout=0
+InpRiskPercent=0.5
+InpRSI_Per=14
+InpATRMult=3.5
+InpTPMultiplier=1.5
+InpSafetyThreshold=5.0
+InpDisableSafety=0

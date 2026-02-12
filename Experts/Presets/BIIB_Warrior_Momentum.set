@@ -1,0 +1,12 @@
+; OBS1DIAN AI - BIIB Warrior
+InpMagicNum=3001
+InpAdaptive=0
+InpUseKAMA=0
+InpUseMeanRev=0
+InpUseWarrior=1
+InpUseBreakout=0
+InpRiskPercent=0.8
+InpATRMult=3.5
+InpTPMultiplier=2.0
+InpSafetyThreshold=5.0
+InpDisableSafety=0

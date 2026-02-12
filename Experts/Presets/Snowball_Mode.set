@@ -1,0 +1,26 @@
+; OBS1DIAN AI - Snowball Mode (Pyramiding)
+; Use APENAS em dias de Tendência Forte confirmada (Hurst > 0.6)
+; Risco inicial baixo (0.5%) para permitir alavancagem progressiva.
+
+InpMagicNum=999005
+InpAdaptive=1
+InpUseKAMA=1
+InpUseMeanRev=0
+InpUseWarrior=1
+InpUseBreakout=0
+
+; --- Gestão de Risco Base ---
+InpRiskPercent=0.5
+InpATRMult=3.5
+InpTPMultiplier=5.0 ; TP Longo para deixar o lucro correr
+
+; --- Configuração Snowball ---
+InpUsePyramiding=1
+InpPyramidStepATR=1.5
+InpMaxLayers=4
+
+; --- Segurança ---
+InpSafetyThreshold=1.5
+InpDisableSafety=0
+InpEntropyThreshold=0.85 ; Mais rigoroso com ruído
+InpUseHurst=1

@@ -1,0 +1,12 @@
+; OBS1DIAN AI - NVDA KAMA
+InpMagicNum=1010
+InpAdaptive=0
+InpUseKAMA=1
+InpUseMeanRev=0
+InpUseWarrior=0
+InpUseBreakout=0
+InpRiskPercent=1.0
+InpATRMult=3.5
+InpTPMultiplier=1.8
+InpSafetyThreshold=5.0
+InpDisableSafety=0

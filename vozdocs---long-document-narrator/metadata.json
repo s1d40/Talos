@@ -1,0 +1,7 @@
+{
+  "name": "VozDocs - Long Document Narrator",
+  "description": "Convert long documents (PDF/Text) into high-quality Brazilian Portuguese speech using Gemini 2.5 Flash TTS.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

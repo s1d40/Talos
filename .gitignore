@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+
+# Logs e Dados Temporários
+*.log
+*.tmp
+*.bak
+research/bridge_state/
+research/overseer_state/
+bridge_auth/
+bridge_state/
+overseer_state/
+.gemini/
+
+# Arquivos de Dados Grandes/Sensiveis do MT5
+Reports/
+research/live_market_feed.csv
+research/strategic_directives.json
+research/daily_focus.json
+screenshots/
+
+# Arquivos do Sistema Operacional
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/
+
+# MetaTrader (Se aplicável, ignorar binários compilados se quiser só o fonte)
+*.ex5

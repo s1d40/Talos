@@ -1,0 +1,8 @@
+InpMagicNum=999104
+InpAdaptive=true
+InpUseSentiment=true
+InpUsePyramiding=true
+InpPyramidStepATR=1.5
+InpMaxLayers=3
+InpRiskPercent=1.0
+InpSafetyThreshold=3.0
