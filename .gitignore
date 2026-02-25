@@ -40,3 +40,7 @@ Thumbs.db
 
 # MetaTrader (Se aplicável, ignorar binários compilados se quiser só o fonte)
 *.ex5
+
+# Sub-apps and Metadata
+vozdocs---long-document-narrator/
+*:Zone.Identifier
