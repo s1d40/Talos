@@ -167,11 +167,12 @@ private:
          if(!FileIsExist(filename)) return 0.0;
       }
       
-      int handle = FileOpen(filename, FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON); 
+      // FIX: Adicionado FILE_SHARE_READ | FILE_SHARE_WRITE para evitar bloqueio
+      int handle = FileOpen(filename, FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_COMMON); 
       if(handle == INVALID_HANDLE) 
       {
-         // Tenta sem FILE_COMMON caso o bridge esteja escrevendo na pasta local do terminal
-         handle = FileOpen(filename, FILE_READ|FILE_TXT|FILE_ANSI);
+         // Tenta sem FILE_COMMON
+         handle = FileOpen(filename, FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE);
          if(handle == INVALID_HANDLE) return 0.0;
       }
       
@@ -339,7 +340,9 @@ private:
       StringReplace(clean_symbol, "m", "");
       
       string filename = "telemetry_" + clean_symbol + ".txt";
-      int handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI); // FILE_WRITE sobrescreve
+      
+      // FIX: Adicionado FILE_SHARE_READ para permitir leitura externa enquanto escreve
+      int handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_SHARE_READ); 
       
       if(handle != INVALID_HANDLE)
       {
@@ -500,10 +503,21 @@ public:
          if(StringFind(asset_key, "m") == StringLen(asset_key) - 1)
             asset_key = StringSubstr(asset_key, 0, StringLen(asset_key) - 1);
             
-         // 2. Bias Override
+         // 2. Check if this asset has specific config
          string bias_cmd = CConfigProvider::ParseString(json, asset_key + "_bias");
-         if(bias_cmd == "") bias_cmd = CConfigProvider::ParseString(json, "GLOBAL_bias");
+         bool is_global = false;
+         if(bias_cmd == "") 
+         {
+            bias_cmd = CConfigProvider::ParseString(json, "GLOBAL_bias");
+            is_global = true;
+         }
          
+         if(bias_cmd != "")
+         {
+            Print("TALOS: Active configuration detected for [", m_symbol, "] (Source: ", (is_global ? "GLOBAL" : "ASSET_SPECIFIC"), "). Updating strategy...");
+         }
+
+         // 3. Bias Override
          if(bias_cmd == "LONG")  m_settings.bias = BIAS_LONG;
          if(bias_cmd == "SHORT") m_settings.bias = BIAS_SHORT;
          if(bias_cmd == "NONE")  m_settings.bias = BIAS_NONE;
@@ -777,7 +791,7 @@ public:
 
       double chg_today = ((current - open_today) / open_today) * 100.0;
       double chg_yest  = ((current - close_yest) / close_yest) * 100.0;
-      double threshold = m_settings.safety_threshold > 0 ? m_settings.safety_threshold : 1.5;
+      double threshold = m_settings.safety_threshold > 0 ? m_settings.safety_threshold : 3.0;
 
       // If trying to BUY, but market is down > threshold (Today or vs Yesterday) -> BLOCKED
       if(attempt == SIGNAL_BUY)

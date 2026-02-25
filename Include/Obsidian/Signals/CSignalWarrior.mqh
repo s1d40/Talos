@@ -92,13 +92,13 @@ ENUM_SIGNAL_TYPE CSignalWarrior::CheckSignal()
    double avg_vol = sum_vol / 20.0;
    double current_vol = (double)iTickVolume(m_symbol, m_period, 0);
    double rvol = (avg_vol > 0) ? (current_vol / avg_vol) : 0;
-   if(rvol < 2.0) return SIGNAL_NONE; 
+   if(rvol < 1.3) return SIGNAL_NONE; 
 
    // 3. BULLISH SETUP (Long Only Ross Cameron)
    if(close > vwap && close > ema20)
    {
-      if(CMathLib::IsBuyingClimax(m_symbol, m_period, 3.0)) return SIGNAL_NONE;
-      bool near_ema9 = (MathAbs(close - ema9) / ema9 < 0.005);
+      if(CMathLib::IsBuyingClimax(m_symbol, m_period, 5.0)) return SIGNAL_NONE;
+      bool near_ema9 = (MathAbs(close - ema9) / ema9 < 0.015);
       bool was_pullback = (close <= open); 
       if(near_ema9 && was_pullback) return SIGNAL_BUY;
    }
@@ -107,7 +107,7 @@ ENUM_SIGNAL_TYPE CSignalWarrior::CheckSignal()
    if(close < vwap && close < ema20)
    {
       // No Climax check for shorts here (unlimited downside potential in panic)
-      bool near_ema9 = (MathAbs(close - ema9) / ema9 < 0.005);
+      bool near_ema9 = (MathAbs(close - ema9) / ema9 < 0.015);
       bool was_rally = (close >= open); // Small bounce into EMA 9
       if(near_ema9 && was_rally) return SIGNAL_SELL;
    }

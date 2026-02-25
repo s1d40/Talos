@@ -6,23 +6,30 @@ __pycache__/
 env/
 venv/
 
-# Logs e Dados Temporários
+# Logs, Dados Temporários e Metadados
 *.log
 *.tmp
 *.bak
+*.csv
+*.xlsx
+*:Zone.Identifier
+sentiment_*.txt
+
+# State / Working Dirs
+research/bridge_auth/
 research/bridge_state/
 research/overseer_state/
 bridge_auth/
 bridge_state/
 overseer_state/
 .gemini/
+MQL5/Files/
+Reports/
+screenshots/
 
 # Arquivos de Dados Grandes/Sensiveis do MT5
-Reports/
-research/live_market_feed.csv
 research/strategic_directives.json
 research/daily_focus.json
-screenshots/
 
 # Arquivos do Sistema Operacional
 .DS_Store

@@ -23,7 +23,7 @@ public:
    CSignalKAMA(int ama_p, int fast_p, int slow_p) 
       : m_ama_period(ama_p), m_fast_ema(fast_p), m_slow_ema(slow_p), m_handle(INVALID_HANDLE) 
    {
-      m_min_slope_points = 50; // 5 pips no Ouro
+      m_min_slope_points = 10; // Reduzido de 50 para 10 (1 pip no Ouro) para maior sensibilidade
    }
 
    virtual bool Init(string symbol, ENUM_TIMEFRAMES period)

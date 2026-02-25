@@ -1,7 +1,7 @@
 import subprocess
 import time
 import os
-import feedparser # pip install feedparser
+import feedparser
 import re
 import json
 from datetime import datetime
@@ -11,41 +11,26 @@ MT5_FILES_PATH = "/mnt/c/Users/hp/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77
 PROJECT_FEED_CSV = "research/live_market_feed.csv"
 BRIDGE_STATE_DIR = os.path.abspath("research/bridge_state")
 SCANNER_JSON = os.path.join(MT5_FILES_PATH, "black_mirror_targets.json")
+MANUAL_FOCUS_JSON = "research/daily_focus.json"
 
 # Feeds de Notícias Financeiras (Real-Time)
 RSS_URLS = [
     "https://finance.yahoo.com/news/rssindex",
     "http://feeds.marketwatch.com/marketwatch/topstories/",
     "https://www.investing.com/rss/news.rss",
-    "https://www.forexlive.com/feed/news" 
+    "https://www.forexlive.com/feed/news",
+    "https://cointelegraph.com/rss"
 ]
 
-# Cache para evitar analisar a mesma notícia duas vezes
 PROCESSED_TITLES = set()
 
-# Ativos e Keywords (Lista Fixa)
-BASE_ASSET_KEYWORDS = {
-    "XAUUSD": [r"\bgold\b", r"\bxau\b", r"\bsilver\b", r"\bmetal\b", r"\bprecious\b"],
-    "BTCUSD": [r"\bbitcoin\b", r"\bbtc\b", r"\bcrypto\b", r"\bethereum\b", r"\beth\b", r"\bdefi\b"],
-    "ORCL": [r"\boracle\b", r"\borcl\b", r"\bcloud\b"],
-    "FTNT": [r"\bfortinet\b", r"\bftnt\b", r"\bcybersecurity\b", r"\bcyber\b"],
-    "AMZN": [r"\bamazon\b", r"\bamzn\b", r"\baws\b", r"\bcapex\b"],
-    "NVDA": [r"\bnvidia\b", r"\bnvda\b", r"\bgpu\b", r"\bai\b"],
-    "TSM": [r"\btsmc\b", r"\btsm\b", r"\bsemiconductor\b", r"\bchip\b", r"\bfab\b"],
-    "BIIB": [r"\bbiogen\b", r"\bbiib\b", r"\balzheimer\b"],
-    "ENJ": [r"\benjin\b", r"\benj\b", r"\bnft\b"],
-    "USDJPY": [r"\byen\b", r"\bjpy\b", r"\bboj\b", r"\bjapan\b"],
-    "GLOBAL": [r"\bfed\b", r"\binflation\b", r"\btrump\b", r"\bmarket\b", r"\bjobs report\b", r"\bpayroll\b"]
-}
-
 def query_gemini_cli(headline):
-    """Analisa sentimento usando o Gemini CLI com isolamento total."""
+    """Analisa sentimento via Gemini."""
     try:
         system_instruction = (
             "Analyze the financial market sentiment of this headline. "
-            "Output ONLY a single float number between -1.0 (extremely bearish) and 1.0 (extremely bullish). "
-            "Neutral is 0.0. "
-            "No markdown, no text, no explanation. Just the number."
+            "Output ONLY a single float number between -1.0 (bearish) and 1.0 (bullish). "
+            "Neutral is 0.0."
         )
         full_prompt = f"{system_instruction} HEADLINE: {headline}"
         env = os.environ.copy()
@@ -56,126 +41,179 @@ def query_gemini_cli(headline):
             capture_output=True, text=True, encoding='utf-8', env=env
         )
         
-        if result.returncode != 0:
-            return 0.0
-
-        # Extração mais robusta: Procura apenas números decimais ou inteiros no output
+        if result.returncode != 0: return 0.0
         numbers = re.findall(r"(-?\d+\.\d+|-?\d+)", result.stdout.strip())
-        if not numbers:
-            return 0.0
-            
-        # Pega o último número, mas aplica CLAMPING rígido de -1.0 a 1.0
-        val = float(numbers[-1])
-        return max(min(val, 1.0), -1.0)
-    except:
-        return 0.0
+        return max(min(float(numbers[-1]), 1.0), -1.0) if numbers else 0.0
+    except: return 0.0
 
 def update_local_feed(asset_key, sentiment_raw, sentiment_ema, topic):
-    """Log local expandido: Timestamp | Ativo | Raw | EMA | Headline"""
     try:
         file_exists = os.path.isfile(PROJECT_FEED_CSV)
         with open(PROJECT_FEED_CSV, "a", encoding="utf-8") as f:
-            if not file_exists:
-                f.write("timestamp;asset;raw_pct;ema_pct;headline\n")
-            
+            if not file_exists: f.write("timestamp;asset;raw_pct;ema_pct;headline\n")
             raw_p = f"{sentiment_raw * 100:.1f}%"
             ema_p = f"{sentiment_ema * 100:.1f}%"
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            clean_topic = topic.replace(";", "-").replace("\n", " ")
+            clean_topic = topic.replace(";", "-").replace("\n", " ").strip()
             f.write(f"{timestamp};{asset_key};{raw_p};{ema_p};{clean_topic}\n")
-    except:
-        print("❌ erro feed (motivo: falha ao gravar csv)")
+            print(f"   📝 Log gravado: {asset_key} ({raw_p})")
+    except: pass
 
 def update_mt5_file(asset_key, sentiment, topic):
     try:
         filename = f"sentiment_{asset_key}.txt"
         filepath = os.path.join(MT5_FILES_PATH, filename)
-        
         current_val = 0.0
         if os.path.exists(filepath):
             with open(filepath, "r") as f:
-                content = f.read().split('|')
-                if len(content) > 0:
-                    try: current_val = float(content[0])
-                    except: pass
+                try: current_val = float(f.read().split('|')[0])
+                except: pass
         
         new_val = (current_val * 0.7) + (sentiment * 0.3)
-        
-        # Log Local com as duas métricas
         update_local_feed(asset_key, sentiment, new_val, topic)
-
         with open(filepath, "w") as f:
             f.write(f"{new_val:.4f}|{topic}|{int(time.time())}")
-        print(f"📡 Sincronizado [{asset_key}]: {new_val:.4f}")
-    except:
-        print("❌ erro mt5 (motivo: falha ao gravar txt)")
+    except: pass
 
-def get_combined_keywords():
-    """Mescla lista fixa com alvos do Scanner (RVol > 2.0)."""
-    combined = BASE_ASSET_KEYWORDS.copy()
+def generate_keywords(symbol):
+    """Gera keywords inteligentes para um ativo."""
+    clean = symbol.rstrip('m').rstrip('c').upper()
+    keywords = [rf"\b{clean}\b"] # Ticker Base
     
+    # Dicionário de Sinônimos
+    aliases = {
+        "CSCO": ["cisco"], "TMUS": ["t-mobile"], "EQIX": ["equinix"],
+        "IBM": ["ibm", "intl business machines"], "NVDA": ["nvidia"],
+        "XAUUSD": ["gold", "xau"], "XAGUSD": ["silver", "xag"],
+        "BTCUSD": ["bitcoin", "btc", "crypto"], "ETHUSD": ["ethereum", "eth"],
+        "TSM": ["tsmc", "taiwan semi"], "AMZN": ["amazon", "aws"]
+    }
+    
+    if clean in aliases:
+        keywords.extend([rf"\b{a}\b" for a in aliases[clean]])
+        
+    return clean, keywords
+
+def get_combined_targets():
+    """Mescla Scanner (Dinâmico) + Manual Focus (Estratégico)."""
+    combined_targets = {}
+    
+    # 1. Ler Scanner (Dinâmico)
     try:
         if os.path.exists(SCANNER_JSON):
             with open(SCANNER_JSON, "r") as f:
                 data = json.load(f)
-                
-            for symbol, metrics in data.items():
-                # Regra: RVol > 2.0 ou Variação > 3%
-                if metrics.get('rvol', 0) > 2.0 or abs(metrics.get('change', 0)) > 3.0:
-                    clean_sym = symbol.rstrip('m').rstrip('c') # Ex: BYNDm -> BYND
-                    
-                    if clean_sym not in combined:
-                        # Cria regex simples para o novo ativo
-                        combined[clean_sym] = [rf"\b{clean_sym.lower()}\b"]
-                        print(f"   >>> 🔥 Alvo Dinâmico Monitorado: {clean_sym}")
-    except Exception as e:
-        pass
-        
-    return combined
+            for s, m in data.items():
+                if m.get('rvol', 0) > 1.5 or abs(m.get('change', 0)) > 3.0:
+                    clean, kws = generate_keywords(s)
+                    combined_targets[clean] = kws
+    except: pass
+    
+    # 2. Ler Foco Manual (Estratégico)
+    try:
+        if os.path.exists(MANUAL_FOCUS_JSON):
+            with open(MANUAL_FOCUS_JSON, "r") as f:
+                manual_list = json.load(f)
+            for s in manual_list:
+                clean, kws = generate_keywords(s)
+                # Adiciona ou Atualiza (Manual tem prioridade se quisermos, mas aqui só une)
+                if clean not in combined_targets:
+                    combined_targets[clean] = kws
+    except: pass
+    
+    return combined_targets
 
-def get_affected_assets(headline, keyword_map):
-    headline_lower = headline.lower()
-    affected = []
-    for asset, patterns in keyword_map.items():
-        for pattern in patterns:
-            if re.search(pattern, headline_lower):
-                affected.append(asset)
-                break
-    return affected
+def maintain_feed_hygiene():
+    """Mantém o CSV leve, arquivando dados antigos."""
+    MAX_ROWS = 100
+    KEEP_ROWS = 20
+    ARCHIVE_DIR = "research/Archive"
+    
+    try:
+        if not os.path.exists(PROJECT_FEED_CSV): return
+        
+        # Leitura rápida
+        with open(PROJECT_FEED_CSV, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            
+        if len(lines) > MAX_ROWS:
+            print(f"   🧹 Faxina: Arquivando {len(lines) - KEEP_ROWS} entradas antigas...")
+            
+            # Criar diretório de arquivo se não existir
+            if not os.path.exists(ARCHIVE_DIR): os.makedirs(ARCHIVE_DIR)
+            
+            # Nome do Arquivo de Backup
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            archive_path = os.path.join(ARCHIVE_DIR, f"feed_history_{timestamp}.csv")
+            
+            # Salvar Backup
+            with open(archive_path, "w", encoding="utf-8") as f:
+                f.writelines(lines[:-KEEP_ROWS]) # Tudo exceto as últimas
+                
+            # Reescrever Arquivo Vivo (Header + Últimas)
+            header = lines[0]
+            recent_data = lines[-KEEP_ROWS:]
+            
+            # Garantir que não duplicamos o header se ele já estiver nos dados recentes (caso raro)
+            if recent_data[0].startswith("timestamp"):
+                final_content = recent_data
+            else:
+                final_content = [header] + recent_data
+                
+            with open(PROJECT_FEED_CSV, "w", encoding="utf-8") as f:
+                f.writelines(final_content)
+                
+            print(f"   ✨ Feed limpo. Backup salvo em {archive_path}")
+            
+    except Exception as e:
+        print(f"   [!] Erro na limpeza do feed: {e}")
 
 def main():
-    print("--- SHADOW BRIDGE v7.4 (DYNAMIC SCANNER LINK) ---")
+    print("--- SHADOW BRIDGE v8.2.1 (AUTO-CLEAN FIXED) ---")
     print(f"Auth Home: {BRIDGE_STATE_DIR}")
     
+    # Limpeza inicial
+    maintain_feed_hygiene()
+    
     while True:
-        # Atualiza a lista de alvos a cada ciclo
-        current_keywords = get_combined_keywords()
-        print(f"\n🌍 [{datetime.now().strftime('%H:%M:%S')}] Buscando notícias para {len(current_keywords)} ativos...")
+        # Limpeza Periódica (a cada ciclo)
+        maintain_feed_hygiene()
+        
+        # 1. Atualizar Alvos (Híbrido)
+        targets = get_combined_targets() # FIX: Nome correto da função
+        
+        if not targets:
+            print("   💤 Sem alvos. Dormindo...")
+            time.sleep(300); continue
+            
+        print(f"\n🌍 [{datetime.now().strftime('%H:%M:%S')}] Monitorando {len(targets)} ativos: {list(targets.keys())}")
         
         headlines = []
         try:
             for url in RSS_URLS:
                 feed = feedparser.parse(url)
-                for entry in feed.entries[:3]:
+                for entry in feed.entries[:5]:
                     if entry.title not in PROCESSED_TITLES:
                         headlines.append(entry.title)
                         PROCESSED_TITLES.add(entry.title)
         except: pass
         
         for news in headlines:
-            targets = get_affected_assets(news, current_keywords)
-            if not targets: continue
-                
-            print(f"⚡ Analisando: {news[:60]}...")
-            sentiment = query_gemini_cli(news)
+            news_lower = news.lower()
+            hit = False
+            for asset, kws in targets.items():
+                for kw in kws:
+                    if re.search(kw, news_lower):
+                        print(f"   ⚡ MATCH [{asset}]: {news[:60]}...")
+                        sentiment = query_gemini_cli(news)
+                        update_mt5_file(asset, sentiment, news)
+                        hit = True; break
+                if hit: break
             
-            if sentiment != 0.0:
-                for asset in targets:
-                    update_mt5_file(asset, sentiment, news)
-            
-            time.sleep(15) 
-            
-        time.sleep(60)
+            if not hit and re.search(r"\bfed\b|\binflation\b|\brate cut\b", news_lower):
+                 update_mt5_file("GLOBAL", query_gemini_cli(news), news)
+
+        time.sleep(300)
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,17 @@
+{
+  "timestamp": 1740033600,
+  "BYND_bias": "LONG",
+  "ENJUSD_bias": "LONG",
+  "1INCHUSD_bias": "LONG",
+  "strategy_warrior": "ON",
+  "strategy_mean_rev": "ON",
+  "use_pyramiding": "ON",
+  "pyramid_step_atr": 1.0,
+  "max_layers": 3,
+  "risk_percent": 1.0,
+  "tp_multiplier": 2.5,
+  "atr_mult": 1.2,
+  "use_sentiment": "ON",
+  "entropy_threshold": 0.85,
+  "use_adaptive": "OFF"
+}
