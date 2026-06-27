@@ -3,7 +3,7 @@ import glob
 import pandas as pd
 from datetime import datetime
 
-MT5_FILES_PATH = "/mnt/c/Users/hp/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075/MQL5/Files"
+MT5_FILES_PATH = os.environ.get('MT5_FILES_PATH', "/mnt/c/Users/hp/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075/MQL5/Files")
 OUTPUT_MD = "reports/telemetry_dashboard.md"
 OUTPUT_CSV = "reports/telemetry_summary.csv"
 
