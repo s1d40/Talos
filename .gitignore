@@ -41,6 +41,16 @@ Thumbs.db
 # MetaTrader (Se aplicável, ignorar binários compilados se quiser só o fonte)
 *.ex5
 
+# Reports and Dashboards Access
+!reports/
+!reports/**
+!Reports/
+!Reports/**
+
 # Sub-apps and Metadata
 vozdocs---long-document-narrator/
 *:Zone.Identifier
+
+# Sub-repositories
+GeminiCLI_Sentiment_Analysis/
+GeminiCLI_Trading_Overseer/

@@ -1,0 +1,741 @@
+[1mdiff --git a/.gitignore b/.gitignore[m
+[1mindex 439d7f5..c35e81a 100644[m
+[1m--- a/.gitignore[m
+[1m+++ b/.gitignore[m
+[36m@@ -41,6 +41,16 @@[m [mThumbs.db[m
+ # MetaTrader (Se aplicável, ignorar binários compilados se quiser só o fonte)[m
+ *.ex5[m
+ [m
+[32m+[m[32m# Reports and Dashboards Access[m
+[32m+[m[32m!reports/[m
+[32m+[m[32m!reports/**[m
+[32m+[m[32m!Reports/[m
+[32m+[m[32m!Reports/**[m
+[32m+[m
+ # Sub-apps and Metadata[m
+ vozdocs---long-document-narrator/[m
+ *:Zone.Identifier[m
+[32m+[m
+[32m+[m[32m# Sub-repositories[m
+[32m+[m[32mGeminiCLI_Sentiment_Analysis/[m
+[32m+[m[32mGeminiCLI_Trading_Overseer/[m
+[1mdiff --git a/Include/Obsidian/Core/CEngine.mqh b/Include/Obsidian/Core/CEngine.mqh[m
+[1mindex e24fb9b..5ba1d83 100644[m
+[1m--- a/Include/Obsidian/Core/CEngine.mqh[m
+[1m+++ b/Include/Obsidian/Core/CEngine.mqh[m
+[36m@@ -60,6 +60,8 @@[m [mprivate:[m
+    int            m_rsi_handle;[m
+    int            m_atr_handle;[m
+    datetime       m_last_close_time;[m
+[32m+[m[32m   bool           m_waiting_vision; // NOVO: Flag para pausar EA enquanto a IA analisa[m
+[32m+[m[32m   datetime       m_vision_request_time; // NOVO: Timeout para a análise visual[m
+ [m
+    // --- REGIME GOVERNOR (v6.0) ---[m
+    bool CheckMarketRegime()[m
+[36m@@ -304,17 +306,19 @@[m [mprivate:[m
+    int            m_ema200_handle;[m
+    // VWAP handle se disponível, senão calculamos manualmente[m
+ [m
+[31m-   // --- TELEMETRY SYSTEM (v3.0) ---[m
+[32m+[m[32m   // --- TELEMETRY DEEP STATE (v7.5) ---[m
+    void ReportStatus()[m
+    {[m
+       // 1. Coleta Dados Básicos[m
+       double rsi[];[m
+       double ema200[];[m
+       double close[];[m
+[32m+[m[32m      long tick_volume[];[m
+       [m
+       if(CopyBuffer(m_rsi_handle, 0, 0, 1, rsi) < 1) return;[m
+       if(CopyBuffer(m_ema200_handle, 0, 0, 1, ema200) < 1) return;[m
+       if(CopyClose(m_symbol, m_period, 0, 1, close) < 1) return;[m
+[32m+[m[32m      if(CopyTickVolume(m_symbol, m_period, 0, 1, tick_volume) < 1) tick_volume[0] = 0;[m
+       [m
+       double current_price = close[0];[m
+       [m
+[36m@@ -323,38 +327,47 @@[m [mprivate:[m
+       double daily_change = 0.0;[m
+       if(open_today > 0) daily_change = ((current_price - open_today) / open_today) * 100.0;[m
+       [m
+[31m-      // 3. Calcula VWAP (Estimativa Simples M15 se não houver buffer)[m
+[31m-      // Para telemetria macro, usaremos a relação Preço vs EMA200 como proxy de tendência longa[m
+[31m-      // e Preço vs Abertura como proxy de força intraday se VWAP for complexo de extrair aqui.[m
+[31m-      // Mas vamos tentar calcular uma VWAP simples baseada no dia.[m
+[31m-      string vwap_status = "N/A";[m
+[31m-      // Simplificação: Se preço > Abertura + 0.1%, consideramos zona de compra forte (simulando acima da VWAP)[m
+[31m-      if(current_price > open_today) vwap_status = "ABOVE_OPEN";[m
+[31m-      else vwap_status = "BELOW_OPEN";[m
+[31m-      [m
+[32m+[m[32m      // 3. Status Estruturais[m
+[32m+[m[32m      string vwap_status = (current_price > open_today) ? "ABOVE_OPEN" : "BELOW_OPEN";[m
+       string trend_status = (current_price > ema200[0]) ? "BULLISH_MACRO" : "BEARISH_MACRO";[m
+       [m
+[31m-      // 4. Escreve no CSV (Sobrescreve ou Adiciona? Vamos usar um arquivo por ativo para evitar conflito de I/O)[m
+[31m-      // Nome: telemetry_XAUUSD.txt[m
+[32m+[m[32m      // 4. Order Book Proxy (Ask/Bid spread tightness)[m
+[32m+[m[32m      double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);[m
+[32m+[m[32m      double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);[m
+[32m+[m[32m      double spread = (ask - bid) / SymbolInfoDouble(m_symbol, SYMBOL_POINT);[m
+[32m+[m[41m      [m
+[32m+[m[32m      // 5. Drawdown/PnL Metrics[m
+[32m+[m[32m      double floating_pnl = 0.0;[m
+[32m+[m[32m      if(m_position.Select(m_symbol)) floating_pnl = m_position.Profit();[m
+[32m+[m[41m      [m
+[32m+[m[32m      // 6. Escreve no JSON[m
+       string clean_symbol = m_symbol;[m
+       StringReplace(clean_symbol, "m", "");[m
+[32m+[m[32m      string filename = "telemetry_" + clean_symbol + ".json";[m
+       [m
+[31m-      string filename = "telemetry_" + clean_symbol + ".txt";[m
+[31m-      [m
+[31m-      // FIX: Adicionado FILE_SHARE_READ para permitir leitura externa enquanto escreve[m
+       int handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_SHARE_READ); [m
+[31m-      [m
+       if(handle != INVALID_HANDLE)[m
+       {[m
+[31m-         string data = StringFormat("PRICE:%.2f|CHANGE:%.2f|RSI:%.2f|TREND:%s|INTRA:%s|TIME:%s", [m
+[31m-                                    current_price, daily_change, rsi[0], trend_status, vwap_status, TimeToString(TimeCurrent()));[m
+[31m-         FileWrite(handle, data);[m
+[32m+[m[32m         string json_data = "{\n"[m
+[32m+[m[32m            + "  \"symbol\": \"" + m_symbol + "\",\n"[m
+[32m+[m[32m            + "  \"timestamp\": \"" + TimeToString(TimeCurrent()) + "\",\n"[m
+[32m+[m[32m            + "  \"price\": " + DoubleToString(current_price, 5) + ",\n"[m
+[32m+[m[32m            + "  \"daily_change_pct\": " + DoubleToString(daily_change, 2) + ",\n"[m
+[32m+[m[32m            + "  \"rsi\": " + DoubleToString(rsi[0], 2) + ",\n"[m
+[32m+[m[32m            + "  \"trend_status\": \"" + trend_status + "\",\n"[m
+[32m+[m[32m            + "  \"vwap_proxy\": \"" + vwap_status + "\",\n"[m
+[32m+[m[32m            + "  \"tick_volume\": " + IntegerToString(tick_volume[0]) + ",\n"[m
+[32m+[m[32m            + "  \"spread_points\": " + DoubleToString(spread, 1) + ",\n"[m
+[32m+[m[32m            + "  \"floating_pnl\": " + DoubleToString(floating_pnl, 2) + "\n"[m
+[32m+[m[32m            + "}";[m
+[32m+[m[41m            [m
+[32m+[m[32m         FileWrite(handle, json_data);[m
+          FileClose(handle);[m
+       }[m
+    }[m
+ [m
+ public:[m
+[31m-   CEngine() : m_symbol(_Symbol), m_period(_Period), m_last_heartbeat(0), m_rsi_handle(INVALID_HANDLE), m_atr_handle(INVALID_HANDLE), m_ema200_handle(INVALID_HANDLE), m_last_close_time(0) {}[m
+[32m+[m[32m   CEngine() : m_symbol(_Symbol), m_period(_Period), m_last_heartbeat(0), m_rsi_handle(INVALID_HANDLE), m_atr_handle(INVALID_HANDLE), m_ema200_handle(INVALID_HANDLE), m_last_close_time(0), m_waiting_vision(false), m_vision_request_time(0) {}[m
+    [m
+    // --- TRANSACTION MONITOR (Public for EA Entry Point) ---[m
+    void OnTradeTransaction(const MqlTradeTransaction& trans, const MqlTradeRequest& request, const MqlTradeResult& result)[m
+[36m@@ -493,6 +506,13 @@[m [mpublic:[m
+       [m
+       // EXPORT TELEMETRY (Os olhos do Overseer)[m
+       ReportStatus();[m
+[32m+[m[41m      [m
+[32m+[m[32m      // CHECK VISION VERDICT (Se está aguardando análise)[m
+[32m+[m[32m      if(m_waiting_vision)[m
+[32m+[m[32m      {[m
+[32m+[m[32m         CheckVisionVerdict();[m
+[32m+[m[32m         return; // Pula a leitura normal do JSON para não misturar bias[m
+[32m+[m[32m      }[m
+ [m
+       // --- DYNAMIC OVERRIDE (v7.5 - TOTAL CONTROL) ---[m
+       string json = CConfigProvider::ReadFile("talos_control.json");[m
+[36m@@ -737,44 +757,116 @@[m [mpublic:[m
+             if(m_settings.use_adaptive) strat_name += " [Adaptive]";[m
+             else strat_name += " [Manual]";[m
+             [m
+[31m-            ExecuteTrade(sig, strat_name);[m
+[32m+[m[32m            // NOVO: Ao invés de executar, pede confirmação visual[m
+[32m+[m[32m            RequestVisualConfirmation(sig, strat_name);[m
+             return;[m
+          }[m
+       }[m
+    }[m
+ [m
+[31m-   // SAFETY: Check Daily Loss Limit (2% of Account Balance)[m
+[31m-   bool CheckDailyLossLimit()[m
+[32m+[m[32m   // --- NEW VISION AI INTEGRATION ---[m
+[32m+[m[32m   void RequestVisualConfirmation(ENUM_SIGNAL_TYPE sig, string strat_name)[m
+    {[m
+[31m-      double daily_profit = 0;[m
+[31m-      datetime start_day = iTime(m_symbol, PERIOD_D1, 0);[m
+[32m+[m[32m      // 1. Snapshot the Chart[m
+[32m+[m[32m      string clean_symbol = m_symbol;[m
+[32m+[m[32m      StringReplace(clean_symbol, "m", "");[m
+[32m+[m[32m      string filename = "screenshot_" + clean_symbol + ".png";[m
+       [m
+[31m-      if(!HistorySelect(start_day, TimeCurrent())) return false; // Fail safe[m
+[32m+[m[32m      // Remove old screenshot if exists[m
+[32m+[m[32m      if(FileIsExist(filename)) FileDelete(filename);[m
+       [m
+[31m-      int total = HistoryDealsTotal();[m
+[32m+[m[32m      // Take High-Res Screenshot[m
+[32m+[m[32m      ChartScreenShot(0, filename, 1920, 1080, ALIGN_RIGHT);[m
+       [m
+[31m-      for(int i=0; i<total; i++)[m
+[32m+[m[32m      // 2. Draft the Pending Signal JSON[m
+[32m+[m[32m      string sig_str = (sig == SIGNAL_BUY) ? "BUY" : "SELL";[m
+[32m+[m[32m      string pending_json = "{ \"symbol\": \"" + m_symbol + "\", "[m
+[32m+[m[32m                          + "\"signal\": \"" + sig_str + "\", "[m
+[32m+[m[32m                          + "\"strategy\": \"" + strat_name + "\", "[m
+[32m+[m[32m                          + "\"timestamp\": \"" + TimeToString(TimeCurrent()) + "\", "[m
+[32m+[m[32m                          + "\"image\": \"" + filename + "\" }";[m
+[32m+[m[41m                          [m
+[32m+[m[32m      // 3. Write to File[m
+[32m+[m[32m      int handle = FileOpen("pending_signals.json", FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_SHARE_READ);[m
+[32m+[m[32m      if(handle != INVALID_HANDLE)[m
+       {[m
+[31m-         ulong ticket = HistoryDealGetTicket(i);[m
+[31m-         if(ticket > 0)[m
+[31m-         {[m
+[31m-            // Filter by Symbol and Magic Number to be precise[m
+[31m-            if(HistoryDealGetString(ticket, DEAL_SYMBOL) == m_symbol && HistoryDealGetInteger(ticket, DEAL_MAGIC) == m_settings.magic_number)[m
+[31m-            {[m
+[31m-               daily_profit += HistoryDealGetDouble(ticket, DEAL_PROFIT) + HistoryDealGetDouble(ticket, DEAL_COMMISSION) + HistoryDealGetDouble(ticket, DEAL_SWAP);[m
+[31m-            }[m
+[31m-         }[m
+[32m+[m[32m         FileWrite(handle, pending_json);[m
+[32m+[m[32m         FileClose(handle);[m
+[32m+[m[41m         [m
+[32m+[m[32m         // 4. Set State[m
+[32m+[m[32m         m_waiting_vision = true;[m
+[32m+[m[32m         m_vision_request_time = TimeCurrent();[m
+[32m+[m[32m         Print("VISION AI: Signal detected (", sig_str, " via ", strat_name, "). Screenshot taken. Waiting for Overseer Confirmation.");[m
+[32m+[m[32m      }[m
+[32m+[m[32m      else[m
+[32m+[m[32m      {[m
+[32m+[m[32m         Print("VISION AI ERROR: Could not write pending signal. Aborting trade.");[m
+[32m+[m[32m      }[m
+[32m+[m[32m   }[m
+[32m+[m[41m   [m
+[32m+[m[32m   void CheckVisionVerdict()[m
+[32m+[m[32m   {[m
+[32m+[m[32m      // 1. Timeout Check (~3 Minutes)[m
+[32m+[m[32m      if(TimeCurrent() - m_vision_request_time > 180)[m
+[32m+[m[32m      {[m
+[32m+[m[32m         Print("VISION AI: Timeout waiting for AI response. Discarding signal.");[m
+[32m+[m[32m         ResetVisionState();[m
+[32m+[m[32m         return;[m
+       }[m
+       [m
+[31m-      double balance = AccountInfoDouble(ACCOUNT_BALANCE);[m
+[31m-      double limit = balance * -0.02; // -2% limit[m
+[32m+[m[32m      // 2. Read Verdict File[m
+[32m+[m[32m      if(!FileIsExist("vision_verdict.json")) return; // Continua esperando[m
+       [m
+[31m-      if(daily_profit < limit)[m
+[32m+[m[32m      string json = CConfigProvider::ReadFile("vision_verdict.json");[m
+[32m+[m[32m      if(json != "")[m
+       {[m
+[31m-         // Print("SAFETY: Daily Loss Limit Reached! Trading Stopped for ", m_symbol);[m
+[31m-         return true; // Stop Trading[m
+[32m+[m[32m         string symbol_verdict = CConfigProvider::ParseString(json, "symbol");[m
+[32m+[m[41m         [m
+[32m+[m[32m         // Certifica que o veredito é para este ativo (ou ignoramos se for outro)[m
+[32m+[m[32m         if(symbol_verdict == m_symbol)[m
+[32m+[m[32m         {[m
+[32m+[m[32m            string decision = CConfigProvider::ParseString(json, "decision");[m
+[32m+[m[32m            string rationale = CConfigProvider::ParseString(json, "rationale");[m
+[32m+[m[32m            string signal_str = CConfigProvider::ParseString(json, "original_signal");[m
+[32m+[m[41m            [m
+[32m+[m[32m            ENUM_SIGNAL_TYPE sig_to_execute = (signal_str == "BUY") ? SIGNAL_BUY : SIGNAL_SELL;[m
+[32m+[m[41m            [m
+[32m+[m[32m            if(decision == "CONFIRM")[m
+[32m+[m[32m            {[m
+[32m+[m[32m               Print("✔ VISION AI APPROVED: ", rationale);[m
+[32m+[m[32m               ExecuteTrade(sig_to_execute, "AI Verified: " + rationale);[m
+[32m+[m[32m            }[m
+[32m+[m[32m            else if(decision == "REJECT")[m
+[32m+[m[32m            {[m
+[32m+[m[32m               Print("❌ VISION AI REJECTED: ", rationale);[m
+[32m+[m[32m               // Trigger cooldown as if a trade was closed to prevent spamming[m
+[32m+[m[32m               m_last_close_time = TimeCurrent();[m[41m [m
+[32m+[m[32m            }[m
+[32m+[m[32m            else[m
+[32m+[m[32m            {[m
+[32m+[m[32m                Print("VISION AI: Unknown decision format. Discarding.");[m
+[32m+[m[32m            }[m
+[32m+[m[41m            [m
+[32m+[m[32m            // Limpa o estado e deleta o arquivo de veredito para o próximo tick[m
+[32m+[m[32m            ResetVisionState();[m
+[32m+[m[32m            FileDelete("vision_verdict.json");[m[41m [m
+[32m+[m[32m         }[m
+       }[m
+[31m-      return false; // OK to Trade[m
+[32m+[m[32m   }[m
+[32m+[m[41m   [m
+[32m+[m[32m   void ResetVisionState()[m
+[32m+[m[32m   {[m
+[32m+[m[32m      m_waiting_vision = false;[m
+[32m+[m[32m      m_vision_request_time = 0;[m
+[32m+[m[32m      // O Overseer deleta o pending_signals.json, mas podemos garantir deletando o print tb[m
+[32m+[m[32m      FileDelete("pending_signals.json");[m[41m [m
+[32m+[m[32m   }[m
+[32m+[m
+[32m+[m[32m   // SAFETY: Check Daily Loss Limit (2% of Account Balance)[m
+[32m+[m[32m   bool CheckDailyLossLimit()[m
+[32m+[m[32m   {[m
+[32m+[m[32m      // OVERRIDE: Desativa temporariamente o limitador de perda diária a pedido do usuário[m
+[32m+[m[32m      return false;[m
+    }[m
+ [m
+    // SAFETY: Check for Extreme Moves (Circuit Breaker)[m
+[1mdiff --git a/talos_control.json b/talos_control.json[m
+[1mindex bf36efe..dc1c39f 100644[m
+[1m--- a/talos_control.json[m
+[1m+++ b/talos_control.json[m
+[36m@@ -1,17 +1 @@[m
+[31m-{[m
+[31m-  "timestamp": 1740033600,[m
+[31m-  "BYND_bias": "LONG",[m
+[31m-  "ENJUSD_bias": "LONG",[m
+[31m-  "1INCHUSD_bias": "LONG",[m
+[31m-  "strategy_warrior": "ON",[m
+[31m-  "strategy_mean_rev": "ON",[m
+[31m-  "use_pyramiding": "ON",[m
+[31m-  "pyramid_step_atr": 1.0,[m
+[31m-  "max_layers": 3,[m
+[31m-  "risk_percent": 1.0,[m
+[31m-  "tp_multiplier": 2.5,[m
+[31m-  "atr_mult": 1.2,[m
+[31m-  "use_sentiment": "ON",[m
+[31m-  "entropy_threshold": 0.85,[m
+[31m-  "use_adaptive": "OFF"[m
+[31m-}[m
+[32m+[m[32m{"timestamp":1740573000,"comment":"OVERRIDE_ACTIVE_LOW_RISK_MODE","BYND_bias":"NEUTRAL","INTU_bias":"NEUTRAL","NFLX_bias":"NEUTRAL","ENJUSD_bias":"LONG","1INCHUSD_bias":"SHORT","COMPUSD_bias":"SHORT","LINKUSD_bias":"SHORT","BAT_bias":"SHORT","XAUUSD_bias":"LONG","XAGUSD_bias":"NEUTRAL","strategy_warrior":"OFF","strategy_mean_rev":"ON","use_pyramiding":"OFF","pyramid_step_atr":2.0,"max_layers":2,"risk_percent":0.5,"tp_multiplier":2.5,"atr_mult":3.0,"use_sentiment":"ON","entropy_threshold":0.55,"use_adaptive":"ON","cooldown_seconds":3600, "disable_safety":"ON"}[m
+\ No newline at end of file[m
+[1mdiff --git a/utils/shadow_bridge.py b/utils/shadow_bridge.py[m
+[1mdeleted file mode 100644[m
+[1mindex bc4f453..0000000[m
+[1m--- a/utils/shadow_bridge.py[m
+[1m+++ /dev/null[m
+[36m@@ -1,219 +0,0 @@[m
+[31m-import subprocess[m
+[31m-import time[m
+[31m-import os[m
+[31m-import feedparser[m
+[31m-import re[m
+[31m-import json[m
+[31m-from datetime import datetime[m
+[31m-[m
+[31m-# --- CONFIGURAÇÃO (WSL MODE) ---[m
+[31m-MT5_FILES_PATH = "/mnt/c/Users/hp/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075/MQL5/Files"[m
+[31m-PROJECT_FEED_CSV = "research/live_market_feed.csv"[m
+[31m-BRIDGE_STATE_DIR = os.path.abspath("research/bridge_state")[m
+[31m-SCANNER_JSON = os.path.join(MT5_FILES_PATH, "black_mirror_targets.json")[m
+[31m-MANUAL_FOCUS_JSON = "research/daily_focus.json"[m
+[31m-[m
+[31m-# Feeds de Notícias Financeiras (Real-Time)[m
+[31m-RSS_URLS = [[m
+[31m-    "https://finance.yahoo.com/news/rssindex",[m
+[31m-    "http://feeds.marketwatch.com/marketwatch/topstories/",[m
+[31m-    "https://www.investing.com/rss/news.rss",[m
+[31m-    "https://www.forexlive.com/feed/news",[m
+[31m-    "https://cointelegraph.com/rss"[m
+[31m-][m
+[31m-[m
+[31m-PROCESSED_TITLES = set()[m
+[31m-[m
+[31m-def query_gemini_cli(headline):[m
+[31m-    """Analisa sentimento via Gemini."""[m
+[31m-    try:[m
+[31m-        system_instruction = ([m
+[31m-            "Analyze the financial market sentiment of this headline. "[m
+[31m-            "Output ONLY a single float number between -1.0 (bearish) and 1.0 (bullish). "[m
+[31m-            "Neutral is 0.0."[m
+[31m-        )[m
+[31m-        full_prompt = f"{system_instruction} HEADLINE: {headline}"[m
+[31m-        env = os.environ.copy()[m
+[31m-        env["GEMINI_CLI_HOME"] = BRIDGE_STATE_DIR[m
+[31m-        [m
+[31m-        result = subprocess.run([m
+[31m-            ["gemini", "--prompt", full_prompt, "--model", "gemini-2.0-flash"],[m
+[31m-            capture_output=True, text=True, encoding='utf-8', env=env[m
+[31m-        )[m
+[31m-        [m
+[31m-        if result.returncode != 0: return 0.0[m
+[31m-        numbers = re.findall(r"(-?\d+\.\d+|-?\d+)", result.stdout.strip())[m
+[31m-        return max(min(float(numbers[-1]), 1.0), -1.0) if numbers else 0.0[m
+[31m-    except: return 0.0[m
+[31m-[m
+[31m-def update_local_feed(asset_key, sentiment_raw, sentiment_ema, topic):[m
+[31m-    try:[m
+[31m-        file_exists = os.path.isfile(PROJECT_FEED_CSV)[m
+[31m-        with open(PROJECT_FEED_CSV, "a", encoding="utf-8") as f:[m
+[31m-            if not file_exists: f.write("timestamp;asset;raw_pct;ema_pct;headline\n")[m
+[31m-            raw_p = f"{sentiment_raw * 100:.1f}%"[m
+[31m-            ema_p = f"{sentiment_ema * 100:.1f}%"[m
+[31m-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")[m
+[31m-            clean_topic = topic.replace(";", "-").replace("\n", " ").strip()[m
+[31m-            f.write(f"{timestamp};{asset_key};{raw_p};{ema_p};{clean_topic}\n")[m
+[31m-            print(f"   📝 Log gravado: {asset_key} ({raw_p})")[m
+[31m-    except: pass[m
+[31m-[m
+[31m-def update_mt5_file(asset_key, sentiment, topic):[m
+[31m-    try:[m
+[31m-        filename = f"sentiment_{asset_key}.txt"[m
+[31m-        filepath = os.path.join(MT5_FILES_PATH, filename)[m
+[31m-        current_val = 0.0[m
+[31m-        if os.path.exists(filepath):[m
+[31m-            with open(filepath, "r") as f:[m
+[31m-                try: current_val = float(f.read().split('|')[0])[m
+[31m-                except: pass[m
+[31m-        [m
+[31m-        new_val = (current_val * 0.7) + (sentiment * 0.3)[m
+[31m-        update_local_feed(asset_key, sentiment, new_val, topic)[m
+[31m-        with open(filepath, "w") as f:[m
+[31m-            f.write(f"{new_val:.4f}|{topic}|{int(time.time())}")[m
+[31m-    except: pass[m
+[31m-[m
+[31m-def generate_keywords(symbol):[m
+[31m-    """Gera keywords inteligentes para um ativo."""[m
+[31m-    clean = symbol.rstrip('m').rstrip('c').upper()[m
+[31m-    keywords = [rf"\b{clean}\b"] # Ticker Base[m
+[31m-    [m
+[31m-    # Dicionário de Sinônimos[m
+[31m-    aliases = {[m
+[31m-        "CSCO": ["cisco"], "TMUS": ["t-mobile"], "EQIX": ["equinix"],[m
+[31m-        "IBM": ["ibm", "intl business machines"], "NVDA": ["nvidia"],[m
+[31m-        "XAUUSD": ["gold", "xau"], "XAGUSD": ["silver", "xag"],[m
+[31m-        "BTCUSD": ["bitcoin", "btc", "crypto"], "ETHUSD": ["ethereum", "eth"],[m
+[31m-        "TSM": ["tsmc", "taiwan semi"], "AMZN": ["amazon", "aws"][m
+[31m-    }[m
+[31m-    [m
+[31m-    if clean in aliases:[m
+[31m-        keywords.extend([rf"\b{a}\b" for a in aliases[clean]])[m
+[31m-        [m
+[31m-    return clean, keywords[m
+[31m-[m
+[31m-def get_combined_targets():[m
+[31m-    """Mescla Scanner (Dinâmico) + Manual Focus (Estratégico)."""[m
+[31m-    combined_targets = {}[m
+[31m-    [m
+[31m-    # 1. Ler Scanner (Dinâmico)[m
+[31m-    try:[m
+[31m-        if os.path.exists(SCANNER_JSON):[m
+[31m-            with open(SCANNER_JSON, "r") as f:[m
+[31m-                data = json.load(f)[m
+[31m-            for s, m in data.items():[m
+[31m-                if m.get('rvol', 0) > 1.5 or abs(m.get('change', 0)) > 3.0:[m
+[31m-                    clean, kws = generate_keywords(s)[m
+[31m-                    combined_targets[clean] = kws[m
+[31m-    except: pass[m
+[31m-    [m
+[31m-    # 2. Ler Foco Manual (Estratégico)[m
+[31m-    try:[m
+[31m-        if os.path.exists(MANUAL_FOCUS_JSON):[m
+[31m-            with open(MANUAL_FOCUS_JSON, "r") as f:[m
+[31m-                manual_list = json.load(f)[m
+[31m-            for s in manual_list:[m
+[31m-                clean, kws = generate_keywords(s)[m
+[31m-                # Adiciona ou Atualiza (Manual tem prioridade se quisermos, mas aqui só une)[m
+[31m-                if clean not in combined_targets:[m
+[31m-                    combined_targets[clean] = kws[m
+[31m-    except: pass[m
+[31m-    [m
+[31m-    return combined_targets[m
+[31m-[m
+[31m-def maintain_feed_hygiene():[m
+[31m-    """Mantém o CSV leve, arquivando dados antigos."""[m
+[31m-    MAX_ROWS = 100[m
+[31m-    KEEP_ROWS = 20[m
+[31m-    ARCHIVE_DIR = "research/Archive"[m
+[31m-    [m
+[31m-    try:[m
+[31m-        if not os.path.exists(PROJECT_FEED_CSV): return[m
+[31m-        [m
+[31m-        # Leitura rápida[m
+[31m-        with open(PROJECT_FEED_CSV, "r", encoding="utf-8") as f:[m
+[31m-            lines = f.readlines()[m
+[31m-            [m
+[31m-        if len(lines) > MAX_ROWS:[m
+[31m-            print(f"   🧹 Faxina: Arquivando {len(lines) - KEEP_ROWS} entradas antigas...")[m
+[31m-            [m
+[31m-            # Criar diretório de arquivo se não existir[m
+[31m-            if not os.path.exists(ARCHIVE_DIR): os.makedirs(ARCHIVE_DIR)[m
+[31m-            [m
+[31m-            # Nome do Arquivo de Backup[m
+[31m-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")[m
+[31m-            archive_path = os.path.join(ARCHIVE_DIR, f"feed_history_{timestamp}.csv")[m
+[31m-            [m
+[31m-            # Salvar Backup[m
+[31m-            with open(archive_path, "w", encoding="utf-8") as f:[m
+[31m-                f.writelines(lines[:-KEEP_ROWS]) # Tudo exceto as últimas[m
+[31m-                [m
+[31m-            # Reescrever Arquivo Vivo (Header + Últimas)[m
+[31m-            header = lines[0][m
+[31m-            recent_data = lines[-KEEP_ROWS:][m
+[31m-            [m
+[31m-            # Garantir que não duplicamos o header se ele já estiver nos dados recentes (caso raro)[m
+[31m-            if recent_data[0].startswith("timestamp"):[m
+[31m-                final_content = recent_data[m
+[31m-            else:[m
+[31m-                final_content = [header] + recent_data[m
+[31m-                [m
+[31m-            with open(PROJECT_FEED_CSV, "w", encoding="utf-8") as f:[m
+[31m-                f.writelines(final_content)[m
+[31m-                [m
+[31m-            print(f"   ✨ Feed limpo. Backup salvo em {archive_path}")[m
+[31m-            [m
+[31m-    except Exception as e:[m
+[31m-        print(f"   [!] Erro na limpeza do feed: {e}")[m
+[31m-[m
+[31m-def main():[m
+[31m-    print("--- SHADOW BRIDGE v8.2.1 (AUTO-CLEAN FIXED) ---")[m
+[31m-    print(f"Auth Home: {BRIDGE_STATE_DIR}")[m
+[31m-    [m
+[31m-    # Limpeza inicial[m
+[31m-    maintain_feed_hygiene()[m
+[31m-    [m
+[31m-    while True:[m
+[31m-        # Limpeza Periódica (a cada ciclo)[m
+[31m-        maintain_feed_hygiene()[m
+[31m-        [m
+[31m-        # 1. Atualizar Alvos (Híbrido)[m
+[31m-        targets = get_combined_targets() # FIX: Nome correto da função[m
+[31m-        [m
+[31m-        if not targets:[m
+[31m-            print("   💤 Sem alvos. Dormindo...")[m
+[31m-            time.sleep(300); continue[m
+[31m-            [m
+[31m-        print(f"\n🌍 [{datetime.now().strftime('%H:%M:%S')}] Monitorando {len(targets)} ativos: {list(targets.keys())}")[m
+[31m-        [m
+[31m-        headlines = [][m
+[31m-        try:[m
+[31m-            for url in RSS_URLS:[m
+[31m-                feed = feedparser.parse(url)[m
+[31m-                for entry in feed.entries[:5]:[m
+[31m-                    if entry.title not in PROCESSED_TITLES:[m
+[31m-                        headlines.append(entry.title)[m
+[31m-                        PROCESSED_TITLES.add(entry.title)[m
+[31m-        except: pass[m
+[31m-        [m
+[31m-        for news in headlines:[m
+[31m-            news_lower = news.lower()[m
+[31m-            hit = False[m
+[31m-            for asset, kws in targets.items():[m
+[31m-                for kw in kws:[m
+[31m-                    if re.search(kw, news_lower):[m
+[31m-                        print(f"   ⚡ MATCH [{asset}]: {news[:60]}...")[m
+[31m-                        sentiment = query_gemini_cli(news)[m
+[31m-                        update_mt5_file(asset, sentiment, news)[m
+[31m-                        hit = True; break[m
+[31m-                if hit: break[m
+[31m-            [m
+[31m-            if not hit and re.search(r"\bfed\b|\binflation\b|\brate cut\b", news_lower):[m
+[31m-                 update_mt5_file("GLOBAL", query_gemini_cli(news), news)[m
+[31m-[m
+[31m-        time.sleep(300)[m
+[31m-[m
+[31m-if __name__ == "__main__":[m
+[31m-    main()[m
+[1mdiff --git a/utils/shadow_bridge.py b/utils/shadow_bridge.py[m
+[1mnew file mode 120000[m
+[1mindex 0000000..e055a78[m
+[1m--- /dev/null[m
+[1m+++ b/utils/shadow_bridge.py[m
+[36m@@ -0,0 +1 @@[m
+[32m+[m[32m/home/sid/talos/GeminiCLI_Sentiment_Analysis/shadow_bridge.py[m
+\ No newline at end of file[m
+[1mdiff --git a/utils/talos_overseer.py b/utils/talos_overseer.py[m
+[1mdeleted file mode 100644[m
+[1mindex 1fd19ed..0000000[m
+[1m--- a/utils/talos_overseer.py[m
+[1m+++ /dev/null[m
+[36m@@ -1,194 +0,0 @@[m
+[31m-import json[m
+[31m-import os[m
+[31m-import time[m
+[31m-import subprocess[m
+[31m-import pandas as pd[m
+[31m-import re[m
+[31m-import glob[m
+[31m-from datetime import datetime[m
+[31m-[m
+[31m-# --- CONFIGURAÇÃO (WSL) ---[m
+[31m-MT5_BASE_PATH = "/mnt/c/Users/hp/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075/MQL5/Files"[m
+[31m-SCANNER_FILE = os.path.join(MT5_BASE_PATH, "black_mirror_targets.json")[m
+[31m-CONTROL_FILE = os.path.join(MT5_BASE_PATH, "talos_control.json")[m
+[31m-NEWS_FEED_FILE = "research/live_market_feed.csv"[m
+[31m-DIRECTIVES_FILE = "research/strategic_directives.json"[m
+[31m-OVERSEER_STATE_DIR = os.path.abspath("research/overseer_state")[m
+[31m-[m
+[31m-# Intervalo da IA (5 Minutos)[m
+[31m-AI_INTERVAL = 300 [m
+[31m-last_ai_update = 0[m
+[31m-[m
+[31m-def load_json(filepath):[m
+[31m-    try:[m
+[31m-        if os.path.exists(filepath):[m
+[31m-            with open(filepath, "r") as f:[m
+[31m-                return json.load(f)[m
+[31m-    except: return {}[m
+[31m-[m
+[31m-def get_latest_sentiment():[m
+[31m-    """Resume o sentimento recente para o prompt."""[m
+[31m-    summary = [][m
+[31m-    try:[m
+[31m-        if os.path.exists(NEWS_FEED_FILE):[m
+[31m-            df = pd.read_csv(NEWS_FEED_FILE, sep=";")[m
+[31m-            # Pega as ultimas 10 noticias[m
+[31m-            last_rows = df.tail(10)[m
+[31m-            for _, row in last_rows.iterrows():[m
+[31m-                summary.append(f"{row['asset']}: {row['headline']} (Sent: {row['raw_pct']})")[m
+[31m-    except: pass[m
+[31m-    return "\n".join(summary)[m
+[31m-[m
+[31m-def get_live_telemetry():[m
+[31m-    """Lê os arquivos de telemetria gerados pelo robô (RSI, Trend, etc)."""[m
+[31m-    telemetry = {}[m
+[31m-    print(f"   [DEBUG] Buscando telemetria em: {MT5_BASE_PATH}")[m
+[31m-    [m
+[31m-    try:[m
+[31m-        if os.path.exists(MT5_BASE_PATH):[m
+[31m-            files = os.listdir(MT5_BASE_PATH)[m
+[31m-            target_files = [f for f in files if f.startswith("telemetry_") and f.endswith(".txt")][m
+[31m-            [m
+[31m-            print(f"   [DEBUG] Arquivos encontrados ({len(target_files)}): {target_files}")[m
+[31m-            [m
+[31m-            for filename in target_files:[m
+[31m-                try:[m
+[31m-                    filepath = os.path.join(MT5_BASE_PATH, filename)[m
+[31m-                    # Extrair simbolo: telemetry_IBM.txt -> IBM[m
+[31m-                    symbol = filename.replace("telemetry_", "").replace(".txt", "")[m
+[31m-                    [m
+[31m-                    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:[m
+[31m-                        content = f.read().strip()[m
+[31m-                        # Parse: PRICE:258.94|CHANGE:-3.19|RSI:42.29...[m
+[31m-                        data = {}[m
+[31m-                        parts = content.split('|')[m
+[31m-                        for p in parts:[m
+[31m-                            if ':' in p:[m
+[31m-                                k, v = p.split(':', 1) # Limit split to 1 to handle TIME:2026..[m
+[31m-                                data[k] = v.strip()[m
+[31m-                        [m
+[31m-                        telemetry[symbol] = data[m
+[31m-                except Exception as e: [m
+[31m-                    print(f"   [!] Erro lendo {filename}: {e}")[m
+[31m-                    continue[m
+[31m-        else:[m
+[31m-            print(f"   [!] ALERTA: Diretório não encontrado: {MT5_BASE_PATH}")[m
+[31m-    except Exception as e:[m
+[31m-        print(f"   [!] Erro fatal listar dir: {e}")[m
+[31m-        [m
+[31m-    return telemetry[m
+[31m-[m
+[31m-def query_gemini_brain(scanner_data, sentiment_txt, directives, telemetry_data):[m
+[31m-    """Invoca o Gemini CLI para decidir a estratégia com CONTEXTO TOTAL."""[m
+[31m-    [m
+[31m-    # 1. Montar o Contexto[m
+[31m-    prompt = f"""[m
+[31m-    ROLE: You are TALOS OVERSEER, an elite HFT Strategy Engine.[m
+[31m-    [m
+[31m-    CONTEXT:[m
+[31m-    1. Strategic Directives (Macro Plan): [m
+[31m-    {json.dumps(directives)}[m
+[31m-    [m
+[31m-    2. Market Sentiment (News Feed):[m
+[31m-    {sentiment_txt}[m
+[31m-    [m
+[31m-    3. Live Market Scanner (Price Action/Vol):[m
+[31m-    {json.dumps(scanner_data)}[m
+[31m-    [m
+[31m-    4. ROBOT TELEMETRY (Technical Indicators - CRITICAL):[m
+[31m-    {json.dumps(telemetry_data)}[m
+[31m-    * RSI < 30 = Oversold (Good for MeanRev Long)[m
+[31m-    * RSI > 70 = Overbought (Good for MeanRev Short)[m
+[31m-    * TREND = BULLISH_MACRO/BEARISH_MACRO[m
+[31m-    [m
+[31m-    TASK:[m
+[31m-    Analyze ALL data streams and generate the JSON configuration for OBS1DIAN.[m
+[31m-    [m
+[31m-    LOGIC RULES:[m
+[31m-    - IF Directives say LONG but Telemetry RSI is > 60 -> WAIT (Neutral) or Reduced Risk.[m
+[31m-    - IF Directives say LONG and Telemetry RSI is < 30 -> AGGRESSIVE LONG (Deep Value).[m
+[31m-    - IF Scanner shows extreme crash (> -5%) and Sentiment is bad -> SHORT (Follow crash) OR WAIT.[m
+[31m-    - IF Telemetry shows "BEARISH_MACRO", do not force "WARRIOR LONG" unless RSI is oversold (Reversal).[m
+[31m-    [m
+[31m-    OUTPUT FORMAT:[m
+[31m-    Return ONLY a valid JSON object. No markdown.[m
+[31m-    Structure:[m
+[31m-    {{[m
+[31m-      "GLOBAL_bias": "RISK_OFF",[m
+[31m-      "IBM_bias": "LONG",[m
+[31m-      "strategy_warrior": "ON",[m
+[31m-      "strategy_mean_rev": "ON",[m
+[31m-      "fixed_lot": 0.02,[m
+[31m-      "tp_multiplier": 1.5,[m
+[31m-      "cooldown_seconds": 900,[m
+[31m-      "use_sentiment": "ON",[m
+[31m-      "risk_percent": 1.0,[m
+[31m-      "disable_safety": "OFF",[m
+[31m-      "rationale": "Explanation based on Telemetry+Sentiment"[m
+[31m-    }}[m
+[31m-    """[m
+[31m-    [m
+[31m-    try:[m
+[31m-        print("   🧠 Pensando (Gemini 2.0) [Com Telemetria]...")[m
+[31m-        env = os.environ.copy()[m
+[31m-        env["GEMINI_CLI_HOME"] = OVERSEER_STATE_DIR[m
+[31m-        [m
+[31m-        result = subprocess.run([m
+[31m-            ["gemini", "--prompt", prompt, "--model", "gemini-2.0-flash"],[m
+[31m-            capture_output=True, text=True, encoding='utf-8', env=env[m
+[31m-        )[m
+[31m-        [m
+[31m-        if result.returncode != 0:[m
+[31m-            print(f"   [!] Erro CLI: {result.stderr}")[m
+[31m-            return None[m
+[31m-            [m
+[31m-        raw_output = result.stdout[m
+[31m-        match = re.search(r"\{.*\}", raw_output, re.DOTALL)[m
+[31m-        if match:[m
+[31m-            return json.loads(match.group(0))[m
+[31m-        else:[m
+[31m-            return None[m
+[31m-            [m
+[31m-    except Exception as e:[m
+[31m-        print(f"   [!] Erro de execução: {e}")[m
+[31m-        return None[m
+[31m-[m
+[31m-def main():[m
+[31m-    global last_ai_update[m
+[31m-    print(f"--- TALOS OVERSEER v7.1 (FULL TELEMETRY LINK) ---")[m
+[31m-    print(f"Intervalo de Reavaliação: {AI_INTERVAL}s")[m
+[31m-    [m
+[31m-    while True:[m
+[31m-        current_time = time.time()[m
+[31m-        [m
+[31m-        if current_time - last_ai_update > AI_INTERVAL:[m
+[31m-            try:[m
+[31m-                # 1. Coleta TUDO[m
+[31m-                scanner = load_json(SCANNER_FILE)[m
+[31m-                sentiment = get_latest_sentiment()[m
+[31m-                directives = load_json(DIRECTIVES_FILE)[m
+[31m-                telemetry = get_live_telemetry() # Nova Fonte de Dados[m
+[31m-                [m
+[31m-                print(f"\n📡 [{datetime.now().strftime('%H:%M:%S')}] Coletando Telemetria ({len(telemetry)} ativos)...")[m
+[31m-                [m
+[31m-                # 2. Pergunta para a IA[m
+[31m-                ai_decision = query_gemini_brain(scanner, sentiment, directives, telemetry)[m
+[31m-                [m
+[31m-                if ai_decision:[m
+[31m-                    with open(CONTROL_FILE, "w") as f:[m
+[31m-                        json.dump(ai_decision, f, separators=(',', ':'))[m
+[31m-                    [m
+[31m-                    rationale = ai_decision.get("rationale", "N/A")[m
+[31m-                    print(f"   ✅ Estratégia Atualizada.")[m
+[31m-                    print(f"   📝 Rationale: {rationale}")[m
+[31m-                    last_ai_update = current_time[m
+[31m-                else:[m
+[31m-                    print("   ⚠️ Mantendo configuração anterior (Falha IA).")[m
+[31m-                    [m
+[31m-            except Exception as e:[m
+[31m-                print(f"   ❌ Erro Crítico no Loop: {e}")[m
+[31m-        [m
+[31m-        time.sleep(10)[m
+[31m-[m
+[31m-if __name__ == "__main__":[m
+[31m-    main()[m
+[1mdiff --git a/utils/talos_overseer.py b/utils/talos_overseer.py[m
+[1mnew file mode 120000[m
+[1mindex 0000000..ffab18e[m
+[1m--- /dev/null[m
+[1m+++ b/utils/talos_overseer.py[m
+[36m@@ -0,0 +1 @@[m
+[32m+[m[32m/home/sid/talos/GeminiCLI_Trading_Overseer/talos_overseer.py[m
+\ No newline at end of file[m

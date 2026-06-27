@@ -60,6 +60,8 @@ private:
    int            m_rsi_handle;
    int            m_atr_handle;
    datetime       m_last_close_time;
+   bool           m_waiting_vision; // NOVO: Flag para pausar EA enquanto a IA analisa
+   datetime       m_vision_request_time; // NOVO: Timeout para a análise visual
 
    // --- REGIME GOVERNOR (v6.0) ---
    bool CheckMarketRegime()
@@ -304,17 +306,19 @@ private:
    int            m_ema200_handle;
    // VWAP handle se disponível, senão calculamos manualmente
 
-   // --- TELEMETRY SYSTEM (v3.0) ---
+   // --- TELEMETRY DEEP STATE (v7.5) ---
    void ReportStatus()
    {
       // 1. Coleta Dados Básicos
       double rsi[];
       double ema200[];
       double close[];
+      long tick_volume[];
       
       if(CopyBuffer(m_rsi_handle, 0, 0, 1, rsi) < 1) return;
       if(CopyBuffer(m_ema200_handle, 0, 0, 1, ema200) < 1) return;
       if(CopyClose(m_symbol, m_period, 0, 1, close) < 1) return;
+      if(CopyTickVolume(m_symbol, m_period, 0, 1, tick_volume) < 1) tick_volume[0] = 0;
       
       double current_price = close[0];
       
@@ -323,38 +327,47 @@ private:
       double daily_change = 0.0;
       if(open_today > 0) daily_change = ((current_price - open_today) / open_today) * 100.0;
       
-      // 3. Calcula VWAP (Estimativa Simples M15 se não houver buffer)
-      // Para telemetria macro, usaremos a relação Preço vs EMA200 como proxy de tendência longa
-      // e Preço vs Abertura como proxy de força intraday se VWAP for complexo de extrair aqui.
-      // Mas vamos tentar calcular uma VWAP simples baseada no dia.
-      string vwap_status = "N/A";
-      // Simplificação: Se preço > Abertura + 0.1%, consideramos zona de compra forte (simulando acima da VWAP)
-      if(current_price > open_today) vwap_status = "ABOVE_OPEN";
-      else vwap_status = "BELOW_OPEN";
-      
+      // 3. Status Estruturais
+      string vwap_status = (current_price > open_today) ? "ABOVE_OPEN" : "BELOW_OPEN";
       string trend_status = (current_price > ema200[0]) ? "BULLISH_MACRO" : "BEARISH_MACRO";
       
-      // 4. Escreve no CSV (Sobrescreve ou Adiciona? Vamos usar um arquivo por ativo para evitar conflito de I/O)
-      // Nome: telemetry_XAUUSD.txt
+      // 4. Order Book Proxy (Ask/Bid spread tightness)
+      double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
+      double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
+      double spread = (ask - bid) / SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      
+      // 5. Drawdown/PnL Metrics
+      double floating_pnl = 0.0;
+      if(m_position.Select(m_symbol)) floating_pnl = m_position.Profit();
+      
+      // 6. Escreve no JSON
       string clean_symbol = m_symbol;
       StringReplace(clean_symbol, "m", "");
+      string filename = "telemetry_" + clean_symbol + ".json";
       
-      string filename = "telemetry_" + clean_symbol + ".txt";
-      
-      // FIX: Adicionado FILE_SHARE_READ para permitir leitura externa enquanto escreve
       int handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_SHARE_READ); 
-      
       if(handle != INVALID_HANDLE)
       {
-         string data = StringFormat("PRICE:%.2f|CHANGE:%.2f|RSI:%.2f|TREND:%s|INTRA:%s|TIME:%s", 
-                                    current_price, daily_change, rsi[0], trend_status, vwap_status, TimeToString(TimeCurrent()));
-         FileWrite(handle, data);
+         string json_data = "{\n"
+            + "  \"symbol\": \"" + m_symbol + "\",\n"
+            + "  \"timestamp\": \"" + TimeToString(TimeCurrent()) + "\",\n"
+            + "  \"price\": " + DoubleToString(current_price, 5) + ",\n"
+            + "  \"daily_change_pct\": " + DoubleToString(daily_change, 2) + ",\n"
+            + "  \"rsi\": " + DoubleToString(rsi[0], 2) + ",\n"
+            + "  \"trend_status\": \"" + trend_status + "\",\n"
+            + "  \"vwap_proxy\": \"" + vwap_status + "\",\n"
+            + "  \"tick_volume\": " + IntegerToString(tick_volume[0]) + ",\n"
+            + "  \"spread_points\": " + DoubleToString(spread, 1) + ",\n"
+            + "  \"floating_pnl\": " + DoubleToString(floating_pnl, 2) + "\n"
+            + "}";
+            
+         FileWrite(handle, json_data);
          FileClose(handle);
       }
    }
 
 public:
-   CEngine() : m_symbol(_Symbol), m_period(_Period), m_last_heartbeat(0), m_rsi_handle(INVALID_HANDLE), m_atr_handle(INVALID_HANDLE), m_ema200_handle(INVALID_HANDLE), m_last_close_time(0) {}
+   CEngine() : m_symbol(_Symbol), m_period(_Period), m_last_heartbeat(0), m_rsi_handle(INVALID_HANDLE), m_atr_handle(INVALID_HANDLE), m_ema200_handle(INVALID_HANDLE), m_last_close_time(0), m_waiting_vision(false), m_vision_request_time(0) {}
    
    // --- TRANSACTION MONITOR (Public for EA Entry Point) ---
    void OnTradeTransaction(const MqlTradeTransaction& trans, const MqlTradeRequest& request, const MqlTradeResult& result)
@@ -493,6 +506,13 @@ public:
       
       // EXPORT TELEMETRY (Os olhos do Overseer)
       ReportStatus();
+      
+      // CHECK VISION VERDICT (Se está aguardando análise)
+      if(m_waiting_vision)
+      {
+         CheckVisionVerdict();
+         return; // Pula a leitura normal do JSON para não misturar bias
+      }
 
       // --- DYNAMIC OVERRIDE (v7.5 - TOTAL CONTROL) ---
       string json = CConfigProvider::ReadFile("talos_control.json");
@@ -737,44 +757,116 @@ public:
             if(m_settings.use_adaptive) strat_name += " [Adaptive]";
             else strat_name += " [Manual]";
             
-            ExecuteTrade(sig, strat_name);
+            // NOVO: Ao invés de executar, pede confirmação visual
+            RequestVisualConfirmation(sig, strat_name);
             return;
          }
       }
    }
 
+   // --- NEW VISION AI INTEGRATION ---
+   void RequestVisualConfirmation(ENUM_SIGNAL_TYPE sig, string strat_name)
+   {
+      // 1. Snapshot the Chart
+      string clean_symbol = m_symbol;
+      StringReplace(clean_symbol, "m", "");
+      string filename = "screenshot_" + clean_symbol + ".png";
+      
+      // Remove old screenshot if exists
+      if(FileIsExist(filename)) FileDelete(filename);
+      
+      // Take High-Res Screenshot
+      ChartScreenShot(0, filename, 1920, 1080, ALIGN_RIGHT);
+      
+      // 2. Draft the Pending Signal JSON
+      string sig_str = (sig == SIGNAL_BUY) ? "BUY" : "SELL";
+      string pending_json = "{ \"symbol\": \"" + m_symbol + "\", "
+                          + "\"signal\": \"" + sig_str + "\", "
+                          + "\"strategy\": \"" + strat_name + "\", "
+                          + "\"timestamp\": \"" + TimeToString(TimeCurrent()) + "\", "
+                          + "\"image\": \"" + filename + "\" }";
+                          
+      // 3. Write to File
+      int handle = FileOpen("pending_signals.json", FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_SHARE_READ);
+      if(handle != INVALID_HANDLE)
+      {
+         FileWrite(handle, pending_json);
+         FileClose(handle);
+         
+         // 4. Set State
+         m_waiting_vision = true;
+         m_vision_request_time = TimeCurrent();
+         Print("VISION AI: Signal detected (", sig_str, " via ", strat_name, "). Screenshot taken. Waiting for Overseer Confirmation.");
+      }
+      else
+      {
+         Print("VISION AI ERROR: Could not write pending signal. Aborting trade.");
+      }
+   }
+   
+   void CheckVisionVerdict()
+   {
+      // 1. Timeout Check (~3 Minutes)
+      if(TimeCurrent() - m_vision_request_time > 180)
+      {
+         Print("VISION AI: Timeout waiting for AI response. Discarding signal.");
+         ResetVisionState();
+         return;
+      }
+      
+      // 2. Read Verdict File
+      if(!FileIsExist("vision_verdict.json")) return; // Continua esperando
+      
+      string json = CConfigProvider::ReadFile("vision_verdict.json");
+      if(json != "")
+      {
+         string symbol_verdict = CConfigProvider::ParseString(json, "symbol");
+         
+         // Certifica que o veredito é para este ativo (ou ignoramos se for outro)
+         if(symbol_verdict == m_symbol)
+         {
+            string decision = CConfigProvider::ParseString(json, "decision");
+            string rationale = CConfigProvider::ParseString(json, "rationale");
+            string signal_str = CConfigProvider::ParseString(json, "original_signal");
+            
+            ENUM_SIGNAL_TYPE sig_to_execute = (signal_str == "BUY") ? SIGNAL_BUY : SIGNAL_SELL;
+            
+            if(decision == "CONFIRM")
+            {
+               Print("✔ VISION AI APPROVED: ", rationale);
+               ExecuteTrade(sig_to_execute, "AI Verified: " + rationale);
+            }
+            else if(decision == "REJECT")
+            {
+               Print("❌ VISION AI REJECTED: ", rationale);
+               // Trigger cooldown as if a trade was closed to prevent spamming
+               m_last_close_time = TimeCurrent(); 
+            }
+            else
+            {
+                Print("VISION AI: Unknown decision format. Discarding.");
+            }
+            
+            // Limpa o estado e deleta o arquivo de veredito para o próximo tick
+            ResetVisionState();
+            FileDelete("vision_verdict.json"); 
+         }
+      }
+   }
+   
+   void ResetVisionState()
+   {
+      m_waiting_vision = false;
+      m_vision_request_time = 0;
+      // O Overseer deleta o pending_signals.json, mas podemos garantir deletando o print tb
+      FileDelete("pending_signals.json"); 
+   }
+
    // SAFETY: Check Daily Loss Limit (2% of Account Balance)
    bool CheckDailyLossLimit()
    {
-      double daily_profit = 0;
-      datetime start_day = iTime(m_symbol, PERIOD_D1, 0);
-      
-      if(!HistorySelect(start_day, TimeCurrent())) return false; // Fail safe
-      
-      int total = HistoryDealsTotal();
-      
-      for(int i=0; i<total; i++)
-      {
-         ulong ticket = HistoryDealGetTicket(i);
-         if(ticket > 0)
-         {
-            // Filter by Symbol and Magic Number to be precise
-            if(HistoryDealGetString(ticket, DEAL_SYMBOL) == m_symbol && HistoryDealGetInteger(ticket, DEAL_MAGIC) == m_settings.magic_number)
-            {
-               daily_profit += HistoryDealGetDouble(ticket, DEAL_PROFIT) + HistoryDealGetDouble(ticket, DEAL_COMMISSION) + HistoryDealGetDouble(ticket, DEAL_SWAP);
-            }
-         }
-      }
-      
-      double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-      double limit = balance * -0.02; // -2% limit
-      
-      if(daily_profit < limit)
-      {
-         // Print("SAFETY: Daily Loss Limit Reached! Trading Stopped for ", m_symbol);
-         return true; // Stop Trading
-      }
-      return false; // OK to Trade
+      // OVERRIDE: Desativa temporariamente o limitador de perda diária a pedido do usuário
+      return false;
    }
 
    // SAFETY: Check for Extreme Moves (Circuit Breaker)

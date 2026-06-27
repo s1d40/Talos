@@ -1,17 +1,1 @@
-{
-  "timestamp": 1740033600,
-  "BYND_bias": "LONG",
-  "ENJUSD_bias": "LONG",
-  "1INCHUSD_bias": "LONG",
-  "strategy_warrior": "ON",
-  "strategy_mean_rev": "ON",
-  "use_pyramiding": "ON",
-  "pyramid_step_atr": 1.0,
-  "max_layers": 3,
-  "risk_percent": 1.0,
-  "tp_multiplier": 2.5,
-  "atr_mult": 1.2,
-  "use_sentiment": "ON",
-  "entropy_threshold": 0.85,
-  "use_adaptive": "OFF"
-}
+{"timestamp":1740573000,"comment":"OVERRIDE_ACTIVE_LOW_RISK_MODE","BYND_bias":"NEUTRAL","INTU_bias":"NEUTRAL","NFLX_bias":"NEUTRAL","ENJUSD_bias":"LONG","1INCHUSD_bias":"SHORT","COMPUSD_bias":"SHORT","LINKUSD_bias":"SHORT","BAT_bias":"SHORT","XAUUSD_bias":"LONG","XAGUSD_bias":"NEUTRAL","strategy_warrior":"OFF","strategy_mean_rev":"ON","use_pyramiding":"OFF","pyramid_step_atr":2.0,"max_layers":2,"risk_percent":0.5,"tp_multiplier":2.5,"atr_mult":3.0,"use_sentiment":"ON","entropy_threshold":0.55,"use_adaptive":"ON","cooldown_seconds":3600, "disable_safety":"ON"}
