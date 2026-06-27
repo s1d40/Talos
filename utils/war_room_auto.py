@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 import os
-import subprocess
 import json
 from datetime import datetime
-import time
+from google import genai
+from dotenv import load_dotenv
 
-OVERSEER_STATE_DIR = os.path.abspath("research/overseer_state")
+load_dotenv()
+
 DIRECTIVES_FILE = "research/strategic_directives.json"
 
 def run_premarket_briefing():
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🚀 Inciando Autonomous War Room (Pre-Market Briefing)")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🚀 Iniciando Autonomous War Room (Pre-Market Briefing)")
     
     prompt = """
     ROLE: You are TALOS DEEP RESEARCHER, an elite macro-economic AI.
@@ -30,32 +31,44 @@ def run_premarket_briefing():
     }
     """
     
-    env = os.environ.copy()
-    env["GEMINI_CLI_HOME"] = OVERSEER_STATE_DIR
-    
-    print("   🌐 Consultando AI...")
-    import re
-    result = subprocess.run(
-        ["gemini", "--prompt", prompt, "--model", "gemini-2.5-flash"],
-        capture_output=True, text=True, encoding='utf-8', env=env
-    )
-    
-    if result.returncode != 0:
-        print(f"   [!] Erro CLI: {result.stderr}")
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        print("   [!] Erro: GEMINI_API_KEY não encontrada nas variáveis de ambiente.")
         return
-        
+
+    client = genai.Client(api_key=api_key)
+
+    print("   🌐 Consultando AI (gemini-2.5-flash)...")
+
     try:
-        raw_output = result.stdout
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+
+        raw_output = response.text
+
+        # Clean the output in case the model returned markdown code blocks despite instructions
+        if raw_output.startswith("```json"):
+            raw_output = raw_output.replace("```json\n", "").replace("```", "").strip()
+
+        import re
         match = re.search(r"\{.*\}", raw_output, re.DOTALL)
         if match:
             data = json.loads(match.group(0))
+
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(DIRECTIVES_FILE), exist_ok=True)
+
             with open(DIRECTIVES_FILE, "w") as f:
                 json.dump(data, f, indent=4)
             print(f"   ✅ Diretrizes Estratégicas atualizadas com sucesso em {DIRECTIVES_FILE}.")
         else:
-            print("   [!] Erro: Nenhum JSON válido encontrado na resposta.")
+            print(f"   [!] Erro: Nenhum JSON válido encontrado na resposta. Resposta: {raw_output}")
     except json.JSONDecodeError:
-        print(f"   [!] Erro decodificando resposa JSON: {result.stdout}")
+        print(f"   [!] Erro decodificando resposa JSON: {raw_output}")
+    except Exception as e:
+        print(f"   [!] Erro na API do Gemini: {e}")
 
 if __name__ == "__main__":
     run_premarket_briefing()
