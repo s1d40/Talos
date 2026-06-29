@@ -11,7 +11,7 @@ SENTIMENT_DIR = "research/sentiment"
 
 def analyze_sentiment(asset: str, headlines: list) -> float:
     """
-    Uses gemini-2.5-flash to analyze sentiment of headlines.
+    Uses gemini-3.0-flash to analyze sentiment of headlines.
     Returns a score from -1.0 (Pânico) to 1.0 (Euforia).
     """
     prompt = f"""
@@ -31,7 +31,7 @@ def analyze_sentiment(asset: str, headlines: list) -> float:
 
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.0-flash',
             contents=prompt,
         )
 

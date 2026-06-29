@@ -23,7 +23,7 @@ def analyze_screenshot(image_path: str, prompt: str = "Analyze this trading char
 
         # Generate the response
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.0-flash',
             contents=[prompt, img]
         )
 

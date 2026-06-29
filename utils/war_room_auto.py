@@ -38,11 +38,11 @@ def run_premarket_briefing():
 
     client = genai.Client(api_key=api_key)
 
-    print("   🌐 Consultando AI (gemini-2.5-flash)...")
+    print("   🌐 Consultando AI (gemini-3.0-flash)...")
 
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.0-flash',
             contents=prompt,
         )
 
