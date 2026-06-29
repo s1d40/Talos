@@ -1,7 +1,7 @@
 import os
 import asyncio
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from dotenv import load_dotenv
 from screenshot_analyzer import analyze_screenshot
 import time
@@ -81,55 +81,87 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"Vou monitorar a pasta '{SCREENSHOT_DIR}' e enviar análises automáticas.",
     )
 
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Read telemetry data and reply with status."""
+async def get_status_text() -> str:
     try:
         import pandas as pd
-        # Assumes script is run from project root, e.g., `python utils/telegram_bot.py`
-        csv_path = "reports/telemetry_summary.csv"
-        if os.path.exists(csv_path):
-            df = pd.read_csv(csv_path)
-            summary = df[['ASSET', 'PRICE', 'TREND']].to_string(index=False)
-            await update.message.reply_text(f"📊 **Status do Mercado:**\n```\n{summary}\n```", parse_mode="MarkdownV2")
-        else:
-             await update.message.reply_text("Nenhum dado de telemetria encontrado.")
+        import glob
+        # Tenta ler todos os telemetry_*.json gerados pelo MT5
+        json_files = glob.glob("telemetry_*.json")
+        if not json_files:
+            return "Nenhum dado de telemetria encontrado."
+
+        summary = ""
+        for file in json_files:
+            with open(file, "r") as f:
+                data = json.load(f)
+                summary += f"🪙 **{data.get('symbol', 'UNK')}**\n"
+                summary += f"Preço: {data.get('price', 0)}\n"
+                summary += f"RSI: {data.get('rsi', 0)}\n"
+                summary += f"Drawdown: ${data.get('floating_pnl', 0)}\n"
+                summary += f"Regime: {data.get('trend_status', 'N/A')}\n\n"
+        return summary
     except Exception as e:
-         await update.message.reply_text(f"Erro ao ler status: {e}")
+        return f"Erro ao ler status: {e}"
 
-async def bias(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Set the macro bias in talos_control.json."""
-    if len(context.args) == 0:
-        await update.message.reply_text("Uso: /bias [LONG | SHORT | NEUTRAL]")
-        return
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Read telemetry data and reply with status."""
+    text = await get_status_text()
+    await update.message.reply_text(f"📊 **Status do Mercado:**\n\n{text}", parse_mode="Markdown")
 
-    new_bias = context.args[0].upper()
-    valid_biases = ["LONG", "SHORT", "NEUTRAL"]
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Shows an interactive menu."""
+    keyboard = [
+        [
+            InlineKeyboardButton("🟢 Bias LONG", callback_data="bias_LONG"),
+            InlineKeyboardButton("🔴 Bias SHORT", callback_data="bias_SHORT"),
+        ],
+        [
+            InlineKeyboardButton("⚖️ Bias NEUTRAL", callback_data="bias_NEUTRAL"),
+            InlineKeyboardButton("📊 Status", callback_data="status"),
+        ],
+        [
+            InlineKeyboardButton("🛑 FECHAR TUDO (PANIC)", callback_data="action_CLOSE_ALL"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("🤖 **OBS1DIAN Painel de Controle**\nSelecione uma ação:", reply_markup=reply_markup, parse_mode="Markdown")
 
-    if new_bias not in valid_biases:
-        await update.message.reply_text(f"Bias inválido. Use um de: {valid_biases}")
-        return
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Parses the CallbackQuery and updates controls."""
+    query = update.callback_query
+    await query.answer()
 
-    import json
-    # Assumes script is run from project root
+    data = query.data
     control_file = "talos_control.json"
 
-    bias_map = {"LONG": "BIAS_LONG", "SHORT": "BIAS_SHORT", "NEUTRAL": "BIAS_NONE"}
-    mql5_bias = bias_map[new_bias]
+    if data == "status":
+        text = await get_status_text()
+        await query.edit_message_text(f"📊 **Status do Mercado:**\n\n{text}", parse_mode="Markdown")
+        return
 
     try:
-        data = {}
+        config_data = {}
         if os.path.exists(control_file):
             with open(control_file, "r") as f:
-                data = json.load(f)
+                config_data = json.load(f)
 
-        data["InpMacroBias"] = mql5_bias
+        if data.startswith("bias_"):
+            bias_val = data.replace("bias_", "")
+            bias_map = {"LONG": "BIAS_LONG", "SHORT": "BIAS_SHORT", "NEUTRAL": "BIAS_NONE"}
+            config_data["GLOBAL_bias"] = bias_map[bias_val]
+            with open(control_file, "w") as f:
+                json.dump(config_data, f, indent=4)
+            await query.edit_message_text(f"✅ Bias atualizado para **{bias_val}** com sucesso!", parse_mode="Markdown")
 
-        with open(control_file, "w") as f:
-            json.dump(data, f, indent=4)
+        elif data.startswith("action_"):
+            action_val = data.replace("action_", "")
+            config_data["GLOBAL_action"] = action_val
+            with open(control_file, "w") as f:
+                json.dump(config_data, f, indent=4)
+            await query.edit_message_text(f"🚨 Ação de Emergência enviada: **{action_val}**", parse_mode="Markdown")
 
-        await update.message.reply_text(f"✅ Bias atualizado para {mql5_bias} com sucesso!")
     except Exception as e:
-        await update.message.reply_text(f"Erro ao atualizar bias: {e}")
+        await query.edit_message_text(f"❌ Erro ao atualizar controle: {e}")
 
 def main() -> None:
     """Start the bot and the file watcher."""
@@ -144,7 +176,8 @@ def main() -> None:
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
-    application.add_handler(CommandHandler("bias", bias))
+    application.add_handler(CommandHandler("menu", menu))
+    application.add_handler(CallbackQueryHandler(button_handler))
 
     # --- Watchdog Setup ---
     print("Iniciando observador de arquivos (Watchdog)...")
