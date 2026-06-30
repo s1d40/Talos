@@ -149,15 +149,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             bias_val = data.replace("bias_", "")
             bias_map = {"LONG": "BIAS_LONG", "SHORT": "BIAS_SHORT", "NEUTRAL": "BIAS_NONE"}
             config_data["GLOBAL_bias"] = bias_map[bias_val]
-            with open(control_file, "w") as f:
+            tmp_file = control_file + ".tmp"
+            with open(tmp_file, "w") as f:
                 json.dump(config_data, f, indent=4)
+            os.replace(tmp_file, control_file)
             await query.edit_message_text(f"✅ Bias atualizado para **{bias_val}** com sucesso!", parse_mode="Markdown")
 
         elif data.startswith("action_"):
             action_val = data.replace("action_", "")
             config_data["GLOBAL_action"] = action_val
-            with open(control_file, "w") as f:
+            tmp_file = control_file + ".tmp"
+            with open(tmp_file, "w") as f:
                 json.dump(config_data, f, indent=4)
+            os.replace(tmp_file, control_file)
             await query.edit_message_text(f"🚨 Ação de Emergência enviada: **{action_val}**", parse_mode="Markdown")
 
     except Exception as e:

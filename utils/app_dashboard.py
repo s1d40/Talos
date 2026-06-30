@@ -44,8 +44,10 @@ def main(page: ft.Page):
         data[key] = value
 
         try:
-            with open(CONTROL_FILE, "w") as f:
+            tmp_file = CONTROL_FILE + ".tmp"
+            with open(tmp_file, "w") as f:
                 json.dump(data, f, indent=4)
+            os.replace(tmp_file, CONTROL_FILE)
             status_text.value = f"Sucesso: {key} definido para {value}"
             status_text.color = ft.colors.GREEN_400
         except Exception as e:

@@ -60,9 +60,11 @@ def run_premarket_briefing():
             # Ensure the directory exists
             os.makedirs(os.path.dirname(DIRECTIVES_FILE), exist_ok=True)
 
-            with open(DIRECTIVES_FILE, "w") as f:
+            tmp_file = DIRECTIVES_FILE + ".tmp"
+            with open(tmp_file, "w") as f:
                 json.dump(data, f, indent=4)
-            print(f"   ✅ Diretrizes Estratégicas atualizadas com sucesso em {DIRECTIVES_FILE}.")
+            os.replace(tmp_file, DIRECTIVES_FILE)
+            print(f"   ✅ Diretrizes Estratégicas atualizadas com sucesso (atomic) em {DIRECTIVES_FILE}.")
         else:
             print(f"   [!] Erro: Nenhum JSON válido encontrado na resposta. Resposta: {raw_output}")
     except json.JSONDecodeError:

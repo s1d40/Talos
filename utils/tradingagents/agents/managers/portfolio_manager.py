@@ -39,6 +39,21 @@ def create_portfolio_manager(llm):
             else ""
         )
 
+        # Injeção de Telemetria do OBS1DIAN (MT5)
+        mt5_telemetry = ""
+        import os, json
+        ticker = state.get("company_name", "")
+        mt5_symbol = ticker.replace("-", "")
+        telemetry_file = f"telemetry_{mt5_symbol}.json"
+
+        if os.path.exists(telemetry_file):
+            try:
+                with open(telemetry_file, "r") as f:
+                    telem_data = json.load(f)
+                    mt5_telemetry = f"- LIVE MT5 TACTICAL TELEMETRY:\n{json.dumps(telem_data, indent=2)}\n(Use these real-time metrics to override long-term views if the market is exhausted or crashing right now.)\n"
+            except Exception:
+                pass
+
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
 {instrument_context}
@@ -56,6 +71,7 @@ def create_portfolio_manager(llm):
 - Research Manager's investment plan: **{research_plan}**
 - Trader's transaction proposal: **{trader_plan}**
 {lessons_line}
+{mt5_telemetry}
 **Risk Analysts Debate History:**
 {history}
 

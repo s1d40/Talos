@@ -366,8 +366,9 @@ private:
       }
    }
 
+   datetime m_last_direct_action_time; // Previne spam do mesmo comando JSON
 public:
-   CEngine() : m_symbol(_Symbol), m_period(_Period), m_last_heartbeat(0), m_rsi_handle(INVALID_HANDLE), m_atr_handle(INVALID_HANDLE), m_ema200_handle(INVALID_HANDLE), m_last_close_time(0), m_waiting_vision(false), m_vision_request_time(0) {}
+   CEngine() : m_symbol(_Symbol), m_period(_Period), m_last_heartbeat(0), m_rsi_handle(INVALID_HANDLE), m_atr_handle(INVALID_HANDLE), m_ema200_handle(INVALID_HANDLE), m_last_close_time(0), m_waiting_vision(false), m_vision_request_time(0), m_last_direct_action_time(0) {}
    
    // --- TRANSACTION MONITOR (Public for EA Entry Point) ---
    void OnTradeTransaction(const MqlTradeTransaction& trans, const MqlTradeRequest& request, const MqlTradeResult& result)
@@ -545,27 +546,35 @@ public:
          
          // 3.1 Direct Agent Actions (v7.5)
          string action_cmd = CConfigProvider::ParseString(json, "GLOBAL_action");
-         if (action_cmd == "CLOSE_ALL")
+
+         // Anti-spam de 2 segundos para dar tempo do disco atualizar o ClearDirectAction()
+         if (action_cmd != "" && action_cmd != "WAIT" && TimeCurrent() - m_last_direct_action_time >= 2)
          {
-            Print("TALOS OVERSEER: Emergency Action [CLOSE_ALL] received.");
-            if (m_position.Select(m_symbol))
-            {
-               m_trade.PositionClose(m_position.Ticket());
-               m_last_close_time = TimeCurrent();
-            }
-            ClearDirectAction();
-         }
-         else if (action_cmd == "BUY_NOW")
-         {
-            Print("TALOS OVERSEER: Direct Action [BUY_NOW] received. Executing...");
-            ExecuteTrade(SIGNAL_BUY, "TALOS_DIRECT_ACTION");
-            ClearDirectAction();
-         }
-         else if (action_cmd == "SELL_NOW")
-         {
-            Print("TALOS OVERSEER: Direct Action [SELL_NOW] received. Executing...");
-            ExecuteTrade(SIGNAL_SELL, "TALOS_DIRECT_ACTION");
-            ClearDirectAction();
+             if (action_cmd == "CLOSE_ALL")
+             {
+                Print("TALOS OVERSEER: Emergency Action [CLOSE_ALL] received.");
+                if (m_position.Select(m_symbol))
+                {
+                   m_trade.PositionClose(m_position.Ticket());
+                   m_last_close_time = TimeCurrent();
+                }
+                m_last_direct_action_time = TimeCurrent();
+                ClearDirectAction();
+             }
+             else if (action_cmd == "BUY_NOW")
+             {
+                Print("TALOS OVERSEER: Direct Action [BUY_NOW] received. Executing...");
+                ExecuteTrade(SIGNAL_BUY, "TALOS_DIRECT_ACTION");
+                m_last_direct_action_time = TimeCurrent();
+                ClearDirectAction();
+             }
+             else if (action_cmd == "SELL_NOW")
+             {
+                Print("TALOS OVERSEER: Direct Action [SELL_NOW] received. Executing...");
+                ExecuteTrade(SIGNAL_SELL, "TALOS_DIRECT_ACTION");
+                m_last_direct_action_time = TimeCurrent();
+                ClearDirectAction();
+             }
          }
 
          // 3.2 Regime Switcher (v7.5)

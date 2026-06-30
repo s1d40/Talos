@@ -138,9 +138,11 @@ def run_overseer():
         final_config["GLOBAL_regime"] = "TRENDING"
 
     try:
-        with open(CONTROL_FILE, "w") as f:
+        tmp_file = CONTROL_FILE + ".tmp"
+        with open(tmp_file, "w") as f:
             json.dump(final_config, f, indent=4)
-        print(f"   ✅ talos_control.json gerado com sucesso.")
+        os.replace(tmp_file, CONTROL_FILE)
+        print(f"   ✅ talos_control.json gerado com sucesso via atomic write.")
     except Exception as e:
         print(f"   [!] Erro ao salvar controle: {e}")
 
